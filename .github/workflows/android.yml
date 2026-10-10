@@ -16,6 +16,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 env:
   BUBBLEWRAP_VERSION: "1.25.0"
   BUILD_TOOLS: "36.1.0"
@@ -26,16 +30,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - name: Error helper
+        # report "message" logfile → posts the log's last lines as an annotation on the run
+        run: |
+          cat > "$RUNNER_TEMP/report.sh" <<'SH'
+          report() {
+            local tail; tail=$(tail -n 60 "$2" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+            tail="${tail//'%'/'%25'}"; tail="${tail//$'\n'/'%0A'}"; tail="${tail//$'\r'/}"
+            echo "::error title=$1::${tail:-$1}"
+          }
+          SH
+          echo "BASH_ENV=$RUNNER_TEMP/report.sh" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Resolve settings
         id: cfg
@@ -76,16 +92,25 @@ jobs:
 
       - name: Prepare Android SDK
         run: |
-          # Bubblewrap expects a bin/ folder in the SDK root.
-          ln -sfn "$ANDROID_HOME/cmdline-tools/latest/bin" "$ANDROID_HOME/bin"
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "build-tools;${BUILD_TOOLS}" "platforms;${PLATFORM}" > /dev/null
+          set +o pipefail
+          sdkm=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+          if [ -z "$sdkm" ]; then report "sdkmanager not found under $ANDROID_HOME/cmdline-tools" /dev/null; exit 1; fi
+          yes 2>/dev/null | "$sdkm" --licenses > sdk.log 2>&1
+          if ! "$sdkm" "build-tools;${BUILD_TOOLS}" "platforms;${PLATFORM}" >> sdk.log 2>&1; then
+            report "sdkmanager install failed" sdk.log; exit 1
+          fi
+          # Bubblewrap wants an SDK root with a bin/ folder. Build a view of the runner's SDK that has one.
+          sdk="$RUNNER_TEMP/android-sdk"; mkdir -p "$sdk"
+          for d in "$ANDROID_HOME"/*; do ln -sfn "$d" "$sdk/$(basename "$d")"; done
+          ln -sfn "$(dirname "$sdkm")" "$sdk/bin"
+          echo "BW_SDK=$sdk" >> "$GITHUB_ENV"
+          ls "$sdk/build-tools"
 
       - name: Install Bubblewrap
         run: |
           npm install -g "@bubblewrap/cli@${BUBBLEWRAP_VERSION}"
           mkdir -p ~/.bubblewrap
-          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$BW_SDK" > ~/.bubblewrap/config.json
 
       - name: Generate project
         env:
@@ -99,7 +124,7 @@ jobs:
             | jq --arg v "$VERSION" --argjson c "$CODE" '.appVersionName = $v | .appVersionCode = $c' \
             > build-android/twa-manifest.json
           cd build-android
-          bubblewrap update --skipVersionUpgrade
+          bubblewrap update --skipVersionUpgrade > update.log 2>&1 || { report "bubblewrap update failed" update.log; exit 1; }
 
       - name: Signing key
         id: key
@@ -128,7 +153,7 @@ jobs:
       - name: Build
         working-directory: build-android
         run: |
-          bubblewrap build --skipPwaValidation
+          bubblewrap build --skipPwaValidation > build.log 2>&1 || { report "bubblewrap build failed" build.log; exit 1; }
           mv app-release-signed.apk "lembar-${{ steps.cfg.outputs.version }}.apk"
           ls -la *.apk *.aab
 
