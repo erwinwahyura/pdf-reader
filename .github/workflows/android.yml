@@ -164,6 +164,21 @@ jobs:
           mv app-release-signed.apk "lembar-${{ steps.cfg.outputs.version }}.apk"
           ls -la *.apk *.aab
 
+      - name: Verify APK
+        working-directory: build-android
+        run: |
+          apk="lembar-${{ steps.cfg.outputs.version }}.apk"
+          aapt2="$BW_SDK/build-tools/${BUILD_TOOLS}/aapt2"
+          "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" > manifest.txt
+          "$aapt2" dump badging "$apk" | grep -E "^package:|minSdkVersion" > badging.txt || true
+          "$BW_SDK/build-tools/${BUILD_TOOLS}/apksigner" verify --print-certs "$apk" | grep -m1 "SHA-256" > cert.txt || true
+          checks=""
+          grep -q 'android.intent.action.VIEW' manifest.txt && grep -q '"application/pdf"' manifest.txt \
+            && checks="$checks Open-with PDF handler ✓;" || { report "APK has no PDF VIEW handler" manifest.txt; exit 1; }
+          grep -q 'FILE_HANDLING_ACTION_URL' manifest.txt && checks="$checks file handling metadata ✓;"
+          grep -q 'METADATA_SHARE_TARGET' manifest.txt && checks="$checks share target ✓;"
+          echo "::notice title=APK check::$(tr '\n' ' ' < badging.txt) |$checks $(cat cert.txt)"
+
       - name: Summary
         run: |
           {
