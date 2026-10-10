@@ -73,6 +73,7 @@ svg{display:block}
 #viewer{position:absolute;inset:0;overflow:auto;touch-action:pan-x pan-y;overscroll-behavior:contain}
 #pages{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;width:max-content;min-width:100%;
   box-sizing:border-box;padding:calc(68px + var(--st)) 12px calc(128px + var(--sb))}
+.prow{display:flex;gap:8px;align-items:flex-start;justify-content:center;flex:none}
 .page{position:relative;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12),0 2px 10px rgba(0,0,0,.06);flex:none}
 .page canvas{position:absolute;inset:0;width:100%;height:100%}
 .page::before{content:attr(data-n);position:absolute;inset:0;display:grid;place-items:center;color:#9AA39E;font:500 13px var(--f-body)}
@@ -214,6 +215,7 @@ img{max-width:100%}
         <button class="lvl num" id="zoomFit" aria-label="Pas lebar layar">Pas</button>
         <button class="ib" id="zoomIn" aria-label="Perbesar"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
       </div>
+      <button class="ib" id="viewBtn" aria-label="Tampilan halaman"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><g class="v1"><rect x="7" y="4" width="10" height="16" rx="1.5"/></g><g class="v2" style="display:none"><rect x="2.5" y="5" width="9" height="14" rx="1.5"/><rect x="12.5" y="5" width="9" height="14" rx="1.5"/></g></svg></button>
       <button class="ib" id="nightBtn" aria-label="Mode malam" aria-pressed="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path class="fillable" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
     </div>
   </div>
@@ -380,7 +382,7 @@ $('#sampleBtn').onclick = openSample;
 
 /* ---------- Reader state ---------- */
 const viewer = $('#viewer'), pagesEl = $('#pages'), reader = $('#reader');
-const S = { pdf: null, task: null, meta: null, gen: 0, scale: 1, fit: true, sizes: [], els: [], rendered: new Map(), tcs: [], texts: [], visible: new Set(), cur: 1, query: '', pushed: false };
+const S = { pdf: null, task: null, meta: null, gen: 0, scale: 1, fit: true, sizes: [], els: [], rendered: new Map(), tcs: [], texts: [], visible: new Set(), cur: 1, query: '', pushed: false, spread: false };
 let io = null;
 
 async function openDoc(meta, data) {
@@ -406,12 +408,14 @@ async function openDoc(meta, data) {
   S.pdf = pdf; const n = pdf.numPages;
   const p1 = await pdf.getPage(1); const v1 = p1.getViewport({ scale: 1 });
   S.sizes = Array.from({ length: n }, () => ({ w: v1.width, h: v1.height }));
-  const frag = document.createDocumentFragment();
-  S.els = S.sizes.map((_, i) => { const el = document.createElement('div'); el.className = 'page'; el.dataset.i = i; el.dataset.n = i + 1; frag.append(el); return el; });
-  pagesEl.append(frag);
+  S.els = S.sizes.map((_, i) => { const el = document.createElement('div'); el.className = 'page'; el.dataset.i = i; el.dataset.n = i + 1; return el; });
+  arrange(wantSpread());
   $('#loading').hidden = true;
   $('#slider').max = n;
-  S.scale = fitScale(); layout();
+  const z = +meta.zoom;
+  S.fit = !(z > 0);
+  S.scale = S.fit ? fitScale() : clampScale(fitScale() * z);
+  layout();
   const start = Math.min(Math.max(1, meta.lastPage || 1), n);
   scrollToPage(start);
   if (io) io.disconnect();
@@ -456,8 +460,43 @@ async function makeThumb(page, meta, gen) {
 }
 
 /* ---------- Layout & rendering ---------- */
-const gutter = () => 24;
-function fitScale() { const w = viewer.clientWidth - gutter(); return Math.min(Math.max(w / S.sizes[0].w, MIN_SCALE), 2.5); }
+const gutter = () => 24, SPREAD_GAP = 8, SPREAD_MIN_WIDTH = 900;
+const clampScale = s => Math.min(Math.max(s, MIN_SCALE), MAX_SCALE);
+function fitScale() {
+  const cols = S.spread ? 2 : 1;
+  const w = (viewer.clientWidth - gutter() - (cols - 1) * SPREAD_GAP) / cols;
+  return Math.min(Math.max(w / S.sizes[0].w, MIN_SCALE), 2.5);
+}
+
+/* Two-page spread. Page 1 stays alone like a book cover, then 2–3, 4–5, … */
+let viewMode = pref.get('view', 'auto'); // 'auto' | 'single' | 'spread'
+function wantSpread() {
+  if (S.els.length < 2 || viewMode === 'single') return false;
+  if (viewMode === 'spread') return true;
+  return viewer.clientWidth >= SPREAD_MIN_WIDTH && viewer.clientWidth > viewer.clientHeight;
+}
+function arrange(spread) {
+  S.spread = spread;
+  const frag = document.createDocumentFragment(); let row = null;
+  S.els.forEach((el, i) => {
+    if (!spread || i === 0 || i % 2 === 1) { row = document.createElement('div'); row.className = 'prow'; frag.append(row); }
+    row.append(el);
+  });
+  pagesEl.replaceChildren(frag);
+  const btn = $('#viewBtn');
+  btn.querySelector('.v1').style.display = spread ? 'none' : '';
+  btn.querySelector('.v2').style.display = spread ? '' : 'none';
+}
+/* Re-fit after resize, rotation or a view-mode change, keeping the zoom relative to fit-width. */
+function relayout() {
+  if (!S.pdf) return;
+  const sp = wantSpread();
+  const a = anchorAt(), rel = S.fit ? 1 : (+S.meta.zoom || 1);
+  if (sp !== S.spread) arrange(sp);
+  S.scale = S.fit ? fitScale() : clampScale(fitScale() * rel);
+  layout(); restore(a); updateZoomLabel(); onScroll(true);
+  clearTimeout(renderT); renderT = setTimeout(() => S.visible.forEach(renderPage), 140);
+}
 function layout() {
   const s = S.scale;
   S.els.forEach((el, i) => { el.style.width = Math.floor(S.sizes[i].w * s) + 'px'; el.style.height = Math.floor(S.sizes[i].h * s) + 'px'; el.style.setProperty('--scale-factor', s); });
@@ -465,6 +504,7 @@ function layout() {
 function pageIndexAtY(y) {
   let lo = 0, hi = S.els.length - 1;
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (S.els[mid].offsetTop <= y) lo = mid; else hi = mid - 1; }
+  while (lo > 0 && S.els[lo - 1].offsetTop === S.els[lo].offsetTop) lo--;
   return lo;
 }
 function anchorAt(fx, fy) {
@@ -481,10 +521,20 @@ function restore(a) {
 let renderT;
 function setScale(s, anchor, fit = false) {
   if (!S.pdf) return;
-  s = Math.min(Math.max(s, MIN_SCALE), MAX_SCALE);
+  s = clampScale(s);
   const a = anchor || anchorAt();
   S.scale = s; S.fit = fit; layout(); restore(a); updateZoomLabel();
   clearTimeout(renderT); renderT = setTimeout(() => S.visible.forEach(renderPage), 140);
+  rememberZoom();
+}
+/* Zoom is stored relative to fit-width, so it carries over between phone, tablet and rotation. */
+let zoomT;
+function rememberZoom() {
+  if (!S.meta) return;
+  const z = S.fit ? null : +(S.scale / fitScale()).toFixed(3);
+  if (z === (S.meta.zoom ?? null)) return;
+  S.meta.zoom = z;
+  clearTimeout(zoomT); zoomT = setTimeout(() => S.meta && store.putMeta(S.meta), 500);
 }
 function updateZoomLabel() { $('#zoomFit').textContent = S.fit ? 'Pas' : Math.round(S.scale / fitScale() * 100) + '%'; }
 
@@ -587,7 +637,13 @@ viewer.addEventListener('wheel', e => {
   const r = viewer.getBoundingClientRect();
   setScale(S.scale * Math.exp(-e.deltaY / 300), anchorAt(e.clientX - r.left, e.clientY - r.top));
 }, { passive: false });
-new ResizeObserver(() => { if (S.pdf && S.fit) setScale(fitScale(), anchorAt(), true); else updateZoomLabel(); }).observe(viewer);
+new ResizeObserver(() => relayout()).observe(viewer);
+
+const VIEW_LABEL = { auto: 'Tampilan otomatis: 2 halaman di layar lebar', single: 'Tampilan 1 halaman', spread: 'Tampilan 2 halaman' };
+$('#viewBtn').onclick = () => {
+  viewMode = { auto: 'single', single: 'spread', spread: 'auto' }[viewMode];
+  pref.set('view', viewMode); relayout(); toast(VIEW_LABEL[viewMode]);
+};
 
 $('#zoomIn').onclick = () => setScale(S.scale * 1.25);
 $('#zoomOut').onclick = () => setScale(S.scale / 1.25);
