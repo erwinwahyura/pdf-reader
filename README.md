@@ -152,7 +152,7 @@ sequenceDiagram
    - `ANDROID_KEYSTORE_BASE64`: output of `base64 -i lembar.keystore` (macOS) or `base64 -w0 lembar.keystore` (Linux)
    - `ANDROID_KEYSTORE_PASSWORD`: the keystore password
 4. **Build:** *Actions → Android APK → Run workflow*. The run summary shows the certificate's SHA-256 fingerprint.
-5. **Trust the app:** paste that fingerprint into `TWA_SHA256` in `wrangler.toml` and push. The Worker then serves `/.well-known/assetlinks.json`, and Chrome hides its URL bar inside the app.
+5. **Trust the app:** paste that fingerprint into `TWA_SHA256` in `wrangler.toml` (both under `[vars]` and `[previews.vars]`) and push. The Worker then serves `/.well-known/assetlinks.json`, and Chrome hides its URL bar inside the app.
 
 ### Releasing
 

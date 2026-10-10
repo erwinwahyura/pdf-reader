@@ -14,3 +14,9 @@ binding = "ASSETS"
 [vars]
 TWA_PACKAGE_ID = "com.erwarx.lembar"
 TWA_SHA256 = ""
+
+# Same values for preview builds (non-production branches run `wrangler preview`).
+# They're public identifiers, so sharing them with previews is safe.
+[previews.vars]
+TWA_PACKAGE_ID = "com.erwarx.lembar"
+TWA_SHA256 = ""
