@@ -163,7 +163,7 @@ Pull requests that touch `android/` build a test APK signed with a throwaway key
 ### Requirements on the phone
 
 - Chrome installed and up to date (the TWA runs inside it)
-- Android 5.0+ (`minSdkVersion` 21)
+- Android 7.0+ (`minSdkVersion` 24, required by androidbrowserhelper)
 
 ## Releasing an update
 
