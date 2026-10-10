@@ -37,7 +37,12 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/report.sh" <<'SH'
           report() {
-            local tail; tail=$(tail -n 60 "$2" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+            local tail
+            # Prefer Gradle's "What went wrong" / "Caused by" lines over the stack trace tail.
+            tail=$(grep -v -E '^\s+at |^\s+\.\.\. [0-9]+ more' "$2" 2>/dev/null \
+              | grep -E -A8 'What went wrong|Caused by|ERROR|error:|FAILURE|Exception' | head -n 60 \
+              | sed 's/\x1b\[[0-9;]*m//g')
+            [ -n "$tail" ] || tail=$(tail -n 60 "$2" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
             tail="${tail//'%'/'%25'}"; tail="${tail//$'\n'/'%0A'}"; tail="${tail//$'\r'/}"
             echo "::error title=$1::${tail:-$1}"
           }
