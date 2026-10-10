@@ -1,0 +1,213 @@
+name: Android APK
+
+# Builds the Lembar Android app (a Trusted Web Activity made with Bubblewrap).
+# - Pull requests touching the Android setup: test build with a throwaway key.
+# - Manual run or a "v*" tag: signed build with the release key; tags also publish a GitHub Release.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUBBLEWRAP_VERSION: "1.25.0"
+  BUILD_TOOLS: "36.1.0"
+  PLATFORM: "android-36"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Error helper
+        # report "message" logfile → posts the log's last lines as an annotation on the run
+        run: |
+          cat > "$RUNNER_TEMP/report.sh" <<'SH'
+          report() {
+            local tail
+            # Prefer Gradle's "What went wrong" / "Caused by" lines over the stack trace tail.
+            tail=$(grep -v -E '^\s+at |^\s+\.\.\. [0-9]+ more' "$2" 2>/dev/null \
+              | grep -E -A8 'What went wrong|Caused by|ERROR|error:|FAILURE|Exception' | head -n 60 \
+              | sed 's/\x1b\[[0-9;]*m//g')
+            [ -n "$tail" ] || tail=$(tail -n 60 "$2" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+            tail="${tail//'%'/'%25'}"; tail="${tail//$'\n'/'%0A'}"; tail="${tail//$'\r'/}"
+            echo "::error title=$1::${tail:-$1}"
+          }
+          SH
+          echo "BASH_ENV=$RUNNER_TEMP/report.sh" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Resolve settings
+        id: cfg
+        env:
+          TWA_HOST: ${{ vars.TWA_HOST }}
+          HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          release=false
+          if [ "${{ github.event_name }}" != "pull_request" ]; then release=true; fi
+
+          host="${TWA_HOST#https://}"; host="${host%%/*}"
+          if [ -z "$host" ]; then
+            if [ "$release" = true ]; then
+              echo "::error::Set the repository variable TWA_HOST (e.g. lembar.erwarx.com) under Settings → Secrets and variables → Actions → Variables."
+              exit 1
+            fi
+            host="lembar.invalid"
+            echo "::warning::TWA_HOST is not set; building a test APK for host '$host'."
+          fi
+
+          if [ "$release" = true ] && [ "$HAS_KEY" != "true" ]; then
+            echo "::error::Add the ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets before building a release. See README → Android app."
+            exit 1
+          fi
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="1.0.${{ github.run_number }}"
+          fi
+
+          {
+            echo "host=$host"
+            echo "release=$release"
+            echo "version=$version"
+            echo "code=${{ github.run_number }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Android SDK
+        run: |
+          set +o pipefail
+          sdkm=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+          if [ -z "$sdkm" ]; then report "sdkmanager not found under $ANDROID_HOME/cmdline-tools" /dev/null; exit 1; fi
+          yes 2>/dev/null | "$sdkm" --licenses > sdk.log 2>&1
+          if ! "$sdkm" "build-tools;${BUILD_TOOLS}" "platforms;${PLATFORM}" >> sdk.log 2>&1; then
+            report "sdkmanager install failed" sdk.log; exit 1
+          fi
+          # Bubblewrap wants an SDK root with a bin/ folder. Build a view of the runner's SDK that has one.
+          sdk="$RUNNER_TEMP/android-sdk"; mkdir -p "$sdk"
+          for d in "$ANDROID_HOME"/*; do ln -sfn "$d" "$sdk/$(basename "$d")"; done
+          ln -sfn "$(dirname "$sdkm")" "$sdk/bin"
+          echo "BW_SDK=$sdk" >> "$GITHUB_ENV"
+          ls "$sdk/build-tools"
+
+      - name: Install Bubblewrap
+        run: |
+          npm install -g "@bubblewrap/cli@${BUBBLEWRAP_VERSION}"
+          mkdir -p ~/.bubblewrap
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$BW_SDK" > ~/.bubblewrap/config.json
+
+      - name: Generate project
+        env:
+          HOST: ${{ steps.cfg.outputs.host }}
+          VERSION: ${{ steps.cfg.outputs.version }}
+          CODE: ${{ steps.cfg.outputs.code }}
+        run: |
+          mkdir build-android
+          icons="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/public/icons"
+          sed -e "s#ICON_BASE#${icons}#g" -e "s#TWA_HOST#${HOST}#g" android/twa-manifest.json \
+            | jq --arg v "$VERSION" --argjson c "$CODE" '.appVersion = $v | .appVersionCode = $c' \
+            > build-android/twa-manifest.json
+          cd build-android
+          bubblewrap update --skipVersionUpgrade > update.log 2>&1 || { report "bubblewrap update failed" update.log; exit 1; }
+
+      - name: Signing key
+        id: key
+        working-directory: build-android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ "${{ steps.cfg.outputs.release }}" = true ]; then
+            echo "$KEYSTORE_B64" | base64 -d > lembar.keystore
+            pass="$KEYSTORE_PASSWORD"
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+          else
+            pass="test-only-$(openssl rand -hex 8)"
+            keytool -genkeypair -keystore lembar.keystore -storetype PKCS12 -alias lembar \
+              -keyalg RSA -keysize 2048 -validity 365 -dname "CN=Lembar test build" \
+              -storepass "$pass" -keypass "$pass" > /dev/null
+            echo "kind=test" >> "$GITHUB_OUTPUT"
+          fi
+          echo "::add-mask::$pass"
+          echo "BUBBLEWRAP_KEYSTORE_PASSWORD=$pass" >> "$GITHUB_ENV"
+          echo "BUBBLEWRAP_KEY_PASSWORD=$pass" >> "$GITHUB_ENV"
+          fp=$(keytool -list -v -keystore lembar.keystore -alias lembar -storepass "$pass" | sed -n 's/.*SHA256: *//p' | head -1)
+          echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: build-android
+        run: |
+          # The runner also sets ANDROID_SDK_ROOT; Gradle refuses two different SDK paths.
+          unset ANDROID_SDK_ROOT
+          bubblewrap build --skipPwaValidation > build.log 2>&1 || { report "bubblewrap build failed" build.log; exit 1; }
+          mv app-release-signed.apk "lembar-${{ steps.cfg.outputs.version }}.apk"
+          ls -la *.apk *.aab
+
+      - name: Verify APK
+        working-directory: build-android
+        run: |
+          apk="lembar-${{ steps.cfg.outputs.version }}.apk"
+          aapt2="$BW_SDK/build-tools/${BUILD_TOOLS}/aapt2"
+          "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" > manifest.txt
+          "$aapt2" dump badging "$apk" | grep -E "^package:|minSdkVersion" > badging.txt || true
+          "$BW_SDK/build-tools/${BUILD_TOOLS}/apksigner" verify --print-certs "$apk" | grep -m1 "SHA-256" > cert.txt || true
+          checks=""
+          grep -q 'android.intent.action.VIEW' manifest.txt && grep -q '"application/pdf"' manifest.txt \
+            && checks="$checks Open-with PDF handler ✓;" || { report "APK has no PDF VIEW handler" manifest.txt; exit 1; }
+          grep -q 'FILE_HANDLING_ACTION_URL' manifest.txt && checks="$checks file handling metadata ✓;"
+          grep -q 'METADATA_SHARE_TARGET' manifest.txt && checks="$checks share target ✓;"
+          echo "::notice title=APK check::$(tr '\n' ' ' < badging.txt) |$checks $(cat cert.txt)"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Lembar ${{ steps.cfg.outputs.version }} (${{ steps.key.outputs.kind }} key)"
+            echo
+            echo "- Host: \`${{ steps.cfg.outputs.host }}\`"
+            echo "- Package: \`com.erwarx.lembar\`"
+            echo "- Signing certificate SHA-256: \`${{ steps.key.outputs.fingerprint }}\`"
+            echo
+            if [ "${{ steps.key.outputs.kind }}" = release ]; then
+              echo "Put that fingerprint in \`TWA_SHA256\` in \`wrangler.toml\` if it isn't there yet, so Chrome trusts the app."
+            else
+              echo "Test build only: signed with a throwaway key, so Chrome will show its URL bar. Don't distribute it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lembar-${{ steps.cfg.outputs.version }}-${{ steps.key.outputs.kind }}
+          path: |
+            build-android/*.apk
+            build-android/*.aab
+          retention-days: 14
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-android/lembar-${{ steps.cfg.outputs.version }}.apk
+          body: |
+            Install on Android: download the APK below, open it, and allow installing from this source when asked.
+            After installing, tap any PDF in WhatsApp and choose **Lembar** in "Open with".

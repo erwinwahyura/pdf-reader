@@ -1,6 +1,6 @@
 # Lembar
 
-A lightweight PDF reader for Android, built as an installable PWA. Open a PDF straight from WhatsApp (or any app) via **Share → Lembar**, read it offline, and pick up where you left off.
+A lightweight PDF reader for Android, built as an installable PWA with an optional Android app wrapper. Tap a PDF in WhatsApp and pick **Lembar** in "Open with" (Android app), or use **Share → Lembar** (PWA). Read offline and pick up where you left off.
 
 Everything runs on the device. Files are never uploaded anywhere.
 
@@ -11,7 +11,9 @@ Everything runs on the device. Files are never uploaded anywhere.
 ## Features
 
 - **Reading:** continuous scroll, pinch-to-zoom, fit-to-width, page slider, jump to page, tap to hide the toolbars
-- **Open from other apps:** registers as a Web Share Target, so it shows up in the Android share sheet once installed
+- **Zoom remembered per document**, stored relative to fit-width so it carries over between phone, tablet and rotation
+- **Two-page spread** on tablets and in landscape (automatic at 900px+ wide, or forced on/off with the view button). Page 1 stays alone like a book cover.
+- **Open from other apps:** "Open with" for PDFs via the Android app (TWA), and the share sheet via the Web Share Target
 - **Recently read:** thumbnails, progress, and auto-resume at the last page (keeps the 15 most recent files)
 - **Search:** full-text search across all pages, with result snippets and in-page highlights
 - **Bookmarks** per document, plus the PDF's own table of contents when it has one
@@ -56,7 +58,11 @@ If the service worker is not active yet, `src/worker.js` catches the POST on Clo
 │   ├── icons/               # any + maskable icons (192, 512)
 │   └── vendor/              # pdf.min.js, pdf.worker.min.js
 ├── src/
-│   └── worker.js            # Worker: serves public/, fallback for POST /share-target
+│   └── worker.js            # Worker: serves public/, assetlinks.json, share fallback
+├── android/
+│   └── twa-manifest.json    # Bubblewrap config for the Android app
+├── .github/workflows/
+│   └── android.yml          # builds and signs the APK
 ├── deploy/
 │   └── Caddyfile            # alternative: self-host behind Caddy
 └── wrangler.toml            # Workers + static assets config
@@ -107,19 +113,73 @@ Copy `public/` to the server and use `deploy/Caddyfile`. Caddy handles HTTPS aut
 2. Tap **Install** on the page (or ⋮ → *Install app*). It has to be a real install, not "Add to Home screen", because only installed WebAPKs appear in the share sheet.
 3. In WhatsApp: long-press a PDF → **Share** → **Lembar**.
 
+## Android app ("Open with" from WhatsApp)
+
+A PWA can't appear in Android's "Open with" list, so the repo also builds a small Android app: a [Trusted Web Activity](https://developer.chrome.com/docs/android/trusted-web-activity) made with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap). It runs this same site full-screen in Chrome and registers as a handler for `application/pdf`. When you tap a PDF, Chrome passes the file to the page's `launchQueue`, which `index.html` already reads.
+
+```mermaid
+sequenceDiagram
+    participant WA as WhatsApp
+    participant APK as Lembar APK
+    participant C as Chrome (TWA)
+    participant App as index.html
+    WA->>APK: ACTION_VIEW content://… (application/pdf)
+    APK->>C: open https://HOST/ with the file
+    C->>C: verify /.well-known/assetlinks.json
+    C->>App: launchQueue → FileSystemFileHandle
+    App->>App: open with pdf.js
+```
+
+### One-time setup
+
+1. **Pick the app's domain** (e.g. `lembar.erwarx.com` or your `*.workers.dev` URL). Add it as a repository **variable** `TWA_HOST`: *Settings → Secrets and variables → Actions → Variables*.
+2. **Create a signing key** on your machine. Keep the file and password safe: every future update must be signed with the same key.
+
+   ```bash
+   keytool -genkeypair -keystore lembar.keystore -storetype PKCS12 -alias lembar \
+     -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Lembar"
+   ```
+
+   No JDK? OpenSSL works too:
+
+   ```bash
+   openssl req -x509 -newkey rsa:2048 -nodes -days 10000 -subj "/CN=Lembar" -keyout key.pem -out cert.pem
+   openssl pkcs12 -export -inkey key.pem -in cert.pem -name lembar -out lembar.keystore
+   rm key.pem   # the private key now lives only inside lembar.keystore
+   ```
+
+3. **Add two repository secrets**:
+   - `ANDROID_KEYSTORE_BASE64`: output of `base64 -i lembar.keystore` (macOS) or `base64 -w0 lembar.keystore` (Linux)
+   - `ANDROID_KEYSTORE_PASSWORD`: the keystore password
+4. **Build:** *Actions → Android APK → Run workflow*. The run summary shows the certificate's SHA-256 fingerprint.
+5. **Trust the app:** paste that fingerprint into `TWA_SHA256` in `wrangler.toml` (both under `[vars]` and `[previews.vars]`) and push. The Worker then serves `/.well-known/assetlinks.json`, and Chrome hides its URL bar inside the app.
+
+### Releasing
+
+Push a tag such as `v1.0.0`. The workflow builds a signed APK and attaches it to a GitHub Release. Download it on the phone, open it, and allow installing from that source when Android asks.
+
+Pull requests that touch `android/` build a test APK signed with a throwaway key. It's useful to check that the build works, but not for installing.
+
+### Requirements on the phone
+
+- Chrome installed and up to date (the TWA runs inside it)
+- Android 7.0+ (`minSdkVersion` 24, required by androidbrowserhelper)
+
 ## Releasing an update
 
-Bump `VERSION` in `public/sw.js` (e.g. `lembar-v3`) on every deploy that changes cached files. This makes the old cache get dropped. `sw.js`, `/` and the manifest are served with `Cache-Control: no-cache`, so clients pick up the new worker on their next visit.
+Bump `VERSION` in `public/sw.js` (e.g. `lembar-v4`) on every deploy that changes cached files. This makes the old cache get dropped. `sw.js`, `/` and the manifest are served with `Cache-Control: no-cache`, so clients pick up the new worker on their next visit.
 
 ## Known limitations
 
-- **No "Open with" on Android.** Chrome on Android doesn't support `file_handlers` for PWAs yet, so tapping a PDF in WhatsApp won't list Lembar. Share works. Getting into "Open with" requires wrapping the PWA as a TWA (Trusted Web Activity) APK with an `application/pdf` intent filter.
+- **"Open with" needs the Android app.** Chrome on Android doesn't support `file_handlers` for installed PWAs, so only the TWA build appears there. The plain PWA gets the share sheet.
+- **iOS** supports neither "Open with" nor share targets for web apps. Use the in-app **Buka PDF** button.
 - **Scanned PDFs** are images with no text layer, so search finds nothing in them.
 - **Storage is per browser.** History and bookmarks live in that browser's IndexedDB and are lost if site data is cleared.
 - **Fonts** load from Google Fonts and are cached after the first visit. On a cold offline start, system fonts are used.
 
 ## Roadmap
 
-- [ ] TWA wrapper (Bubblewrap) + `/.well-known/assetlinks.json` for "Open with"
-- [ ] Remember zoom level per document
-- [ ] Two-page spread on tablets / landscape
+- [x] TWA wrapper (Bubblewrap) + `/.well-known/assetlinks.json` for "Open with"
+- [x] Remember zoom level per document
+- [x] Two-page spread on tablets / landscape
+- [ ] Publish the Android app on Google Play
