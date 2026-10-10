@@ -67,15 +67,8 @@ jobs:
           release=false
           if [ "${{ github.event_name }}" != "pull_request" ]; then release=true; fi
 
-          host="${TWA_HOST#https://}"; host="${host%%/*}"
-          if [ -z "$host" ]; then
-            if [ "$release" = true ]; then
-              echo "::error::Set the repository variable TWA_HOST (e.g. lembar.erwarx.com) under Settings → Secrets and variables → Actions → Variables."
-              exit 1
-            fi
-            host="lembar.invalid"
-            echo "::warning::TWA_HOST is not set; building a test APK for host '$host'."
-          fi
+          # Default host is lembar.erwarx.com; the TWA_HOST repo variable overrides it.
+          host="${TWA_HOST:-lembar.erwarx.com}"; host="${host#https://}"; host="${host%%/*}"
 
           if [ "$release" = true ] && [ "$HAS_KEY" != "true" ]; then
             echo "::error::Add the ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets before building a release. See README → Android app."

@@ -13,10 +13,10 @@ binding = "ASSETS"
 # The "Android APK" GitHub workflow prints it in its run summary.
 [vars]
 TWA_PACKAGE_ID = "com.erwarx.lembar"
-TWA_SHA256 = ""
+TWA_SHA256 = "71:3B:B7:B3:FA:9C:6C:43:9C:18:14:0E:5E:05:D3:F6:01:9A:66:11:0C:54:7A:E4:4C:43:C4:AD:C9:C0:2D:74"
 
 # Same values for preview builds (non-production branches run `wrangler preview`).
 # They're public identifiers, so sharing them with previews is safe.
 [previews.vars]
 TWA_PACKAGE_ID = "com.erwarx.lembar"
-TWA_SHA256 = ""
+TWA_SHA256 = "71:3B:B7:B3:FA:9C:6C:43:9C:18:14:0E:5E:05:D3:F6:01:9A:66:11:0C:54:7A:E4:4C:43:C4:AD:C9:C0:2D:74"
