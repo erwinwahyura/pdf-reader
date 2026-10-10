@@ -1,0 +1,69 @@
+{
+  "packageId": "com.erwarx.lembar",
+  "host": "TWA_HOST",
+  "name": "Lembar — Pembaca PDF",
+  "launcherName": "Lembar",
+  "display": "standalone",
+  "orientation": "default",
+  "themeColor": "#FAFBF8",
+  "themeColorDark": "#1A201E",
+  "navigationColor": "#FAFBF8",
+  "navigationColorDark": "#1A201E",
+  "navigationDividerColor": "#D3D9D2",
+  "navigationDividerColorDark": "#2D3633",
+  "backgroundColor": "#EDF0EC",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "ICON_BASE/icon-512.png",
+  "maskableIconUrl": "ICON_BASE/maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./lembar.keystore",
+    "alias": "lembar"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://TWA_HOST/",
+  "minSdkVersion": 21,
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [
+    {
+      "actionUrl": "https://TWA_HOST/",
+      "mimeTypes": [
+        "application/pdf"
+      ]
+    }
+  ],
+  "shareTarget": {
+    "action": "https://TWA_HOST/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [
+        {
+          "name": "pdf",
+          "accept": [
+            "application/pdf",
+            ".pdf"
+          ]
+        }
+      ]
+    }
+  },
+  "launchHandlerClientMode": "navigate-existing"
+}

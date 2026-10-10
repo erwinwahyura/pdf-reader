@@ -2,3 +2,10 @@ node_modules/
 .wrangler/
 .DS_Store
 *.zip
+
+# Android build output (generated in CI)
+build-android/
+*.keystore
+*.jks
+*.apk
+*.aab
