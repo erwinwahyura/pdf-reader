@@ -126,7 +126,7 @@ jobs:
           mkdir build-android
           icons="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/public/icons"
           sed -e "s#ICON_BASE#${icons}#g" -e "s#TWA_HOST#${HOST}#g" android/twa-manifest.json \
-            | jq --arg v "$VERSION" --argjson c "$CODE" '.appVersionName = $v | .appVersionCode = $c' \
+            | jq --arg v "$VERSION" --argjson c "$CODE" '.appVersion = $v | .appVersionCode = $c' \
             > build-android/twa-manifest.json
           cd build-android
           bubblewrap update --skipVersionUpgrade > update.log 2>&1 || { report "bubblewrap update failed" update.log; exit 1; }
