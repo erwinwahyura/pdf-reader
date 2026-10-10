@@ -1,0 +1,21 @@
+# Cloudflare Pages / Workers static assets response headers
+
+/sw.js
+  Cache-Control: no-cache
+
+/
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+  Cache-Control: no-cache
+
+/vendor/*
+  Cache-Control: public, max-age=2592000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=2592000
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
