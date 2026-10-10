@@ -34,7 +34,7 @@ sequenceDiagram
     App->>App: save to IndexedDB history, render with pdf.js
 ```
 
-If the service worker is not active yet, `functions/share-target.js` (a Cloudflare Pages Function) catches the POST and redirects to `/?share=error` instead of returning a 405.
+If the service worker is not active yet, `src/worker.js` catches the POST on Cloudflare and redirects to `/?share=error` instead of returning a 405.
 
 ## Tech
 
@@ -55,11 +55,11 @@ If the service worker is not active yet, `functions/share-target.js` (a Cloudfla
 │   ├── sample.pdf           # built-in guide document
 │   ├── icons/               # any + maskable icons (192, 512)
 │   └── vendor/              # pdf.min.js, pdf.worker.min.js
-├── functions/
-│   └── share-target.js      # Pages Function fallback for POST /share-target
+├── src/
+│   └── worker.js            # Worker: serves public/, fallback for POST /share-target
 ├── deploy/
 │   └── Caddyfile            # alternative: self-host behind Caddy
-└── wrangler.toml            # for `wrangler pages deploy`
+└── wrangler.toml            # Workers + static assets config
 ```
 
 ## Run locally
@@ -71,26 +71,31 @@ python3 -m http.server 8080 -d public
 
 Open http://localhost:8080. Service workers are allowed on `localhost`. Anywhere else they need HTTPS.
 
-## Deploy to Cloudflare Pages
+## Deploy to Cloudflare Workers
+
+The app is deployed as a Worker with [static assets](https://developers.cloudflare.com/workers/static-assets/). `wrangler.toml` serves `public/`, and `public/_headers` sets the cache and content-type headers.
 
 **Option A: Git integration (recommended)**
 
-1. Push this repo to GitHub.
-2. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → pick the repo.
-3. Build settings:
-   - Framework preset: **None**
+1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Import a repository** → pick this repo.
+2. Build settings:
    - Build command: *(leave empty)*
-   - Build output directory: `public`
-4. Deploy. Every push to `main` redeploys automatically.
-5. Optional: **Custom domains** → add `lembar.erwarx.com`.
+   - Deploy command: `npx wrangler deploy`
+3. Make sure `name` in `wrangler.toml` matches the Worker's name in the dashboard (currently `pdf-reader`).
+4. Every push to `main` redeploys automatically.
+5. Optional: **Settings → Domains & Routes** → add a custom domain such as `lembar.erwarx.com`.
 
-**Option B: direct upload**
+**Option B: from your machine**
 
 ```bash
-npx wrangler pages deploy
+npx wrangler deploy
 ```
 
-`wrangler.toml` already points at `./public`. Run this from the repo root so the `functions/` folder gets picked up.
+Test locally with the same runtime:
+
+```bash
+npx wrangler dev
+```
 
 ### Self-hosting instead
 

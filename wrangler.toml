@@ -1,4 +1,9 @@
-# Used by `npx wrangler pages deploy` (direct upload). Not needed for Git-connected Pages projects.
-name = "lembar"
-pages_build_output_dir = "./public"
+# Cloudflare Workers + static assets. Deploy with: npx wrangler deploy
+# `name` must match the Worker's name in the Cloudflare dashboard.
+name = "pdf-reader"
+main = "src/worker.js"
 compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
