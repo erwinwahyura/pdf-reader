@@ -153,6 +153,8 @@ jobs:
       - name: Build
         working-directory: build-android
         run: |
+          # The runner also sets ANDROID_SDK_ROOT; Gradle refuses two different SDK paths.
+          unset ANDROID_SDK_ROOT
           bubblewrap build --skipPwaValidation > build.log 2>&1 || { report "bubblewrap build failed" build.log; exit 1; }
           mv app-release-signed.apk "lembar-${{ steps.cfg.outputs.version }}.apk"
           ls -la *.apk *.aab
