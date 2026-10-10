@@ -132,27 +132,24 @@ sequenceDiagram
 
 ### One-time setup
 
-1. **Pick the app's domain** (e.g. `lembar.erwarx.com` or your `*.workers.dev` URL). Add it as a repository **variable** `TWA_HOST`: *Settings → Secrets and variables → Actions → Variables*.
-2. **Create a signing key** on your machine. Keep the file and password safe: every future update must be signed with the same key.
+The app opens **https://lembar.erwarx.com** (set in the workflow; a `TWA_HOST` repository variable overrides it). `wrangler.toml` already holds the signing certificate's fingerprint, so the Worker serves `/.well-known/assetlinks.json`.
 
-   ```bash
-   keytool -genkeypair -keystore lembar.keystore -storetype PKCS12 -alias lembar \
-     -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Lembar"
-   ```
+The only thing GitHub needs is the signing key, as two repository secrets (*Settings → Secrets and variables → Actions → Secrets*):
 
-   No JDK? OpenSSL works too:
+- `ANDROID_KEYSTORE_BASE64`: the keystore file, base64-encoded (`base64 -i lembar.keystore` on macOS, `base64 -w0 lembar.keystore` on Linux)
+- `ANDROID_KEYSTORE_PASSWORD`: the keystore password
 
-   ```bash
-   openssl req -x509 -newkey rsa:2048 -nodes -days 10000 -subj "/CN=Lembar" -keyout key.pem -out cert.pem
-   openssl pkcs12 -export -inkey key.pem -in cert.pem -name lembar -out lembar.keystore
-   rm key.pem   # the private key now lives only inside lembar.keystore
-   ```
+Keep a backup of the keystore and password somewhere safe. Every future update must be signed with the same key, or Android will refuse to install it over the old version.
 
-3. **Add two repository secrets**:
-   - `ANDROID_KEYSTORE_BASE64`: output of `base64 -i lembar.keystore` (macOS) or `base64 -w0 lembar.keystore` (Linux)
-   - `ANDROID_KEYSTORE_PASSWORD`: the keystore password
-4. **Build:** *Actions → Android APK → Run workflow*. The run summary shows the certificate's SHA-256 fingerprint.
-5. **Trust the app:** paste that fingerprint into `TWA_SHA256` in `wrangler.toml` (both under `[vars]` and `[previews.vars]`) and push. The Worker then serves `/.well-known/assetlinks.json`, and Chrome hides its URL bar inside the app.
+#### Rotating the key
+
+Create a new one, update both secrets, and replace `TWA_SHA256` in `wrangler.toml` (both `[vars]` and `[previews.vars]`) with the new fingerprint. Phones with the old build have to uninstall it first.
+
+```bash
+keytool -genkeypair -keystore lembar.keystore -storetype PKCS12 -alias lembar \
+  -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Lembar"
+keytool -list -v -keystore lembar.keystore -alias lembar | grep SHA256
+```
 
 ### Releasing
 
