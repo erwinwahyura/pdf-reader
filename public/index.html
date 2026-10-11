@@ -323,7 +323,7 @@ function markify(str, q) {
   return out + esc(str.slice(i));
 }
 let toastT;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
+function toast(msg, ms = 2200) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
 function when(ts) {
   const d = new Date(ts), now = new Date(); const day = 864e5;
   const diff = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / day);
@@ -809,17 +809,26 @@ async function takeShared() {
   const u = new URL(location.href);
   if (!u.searchParams.has('share')) return;
   history.replaceState(null, '', u.pathname);
-  const err = u.searchParams.get('share') === 'error';
-  if (err || !('caches' in window)) { toast('PDF dari aplikasi lain tidak terbaca. Coba bagikan ulang.'); return; }
+  if (u.searchParams.get('share') === 'error') {
+    const why = u.searchParams.get('why'), detail = u.searchParams.get('detail');
+    const msg = {
+      nofile: 'PDF tidak ikut terkirim ke Lembar.',
+      nosw: 'Lembar belum siap. Buka Lembar sekali, lalu bagikan ulang.',
+      exception: 'PDF gagal diterima.',
+    }[why] || 'PDF dari aplikasi lain tidak terbaca.';
+    toast(msg + (detail ? ` (${detail})` : '') + ' Coba bagikan ulang.', 7000);
+    return;
+  }
+  if (!('caches' in window)) { toast('Browser ini tidak mendukung menerima file.', 5000); return; }
   try {
     const c = await caches.open('lembar-share');
     const res = await c.match('/__shared__');
-    if (!res) { toast('Tidak ada PDF yang diterima. Coba bagikan ulang.'); return; }
+    if (!res) { toast('Tidak ada PDF yang diterima. Coba bagikan ulang.', 5000); return; }
     await c.delete('/__shared__');
     const name = decodeURIComponent(res.headers.get('X-Name') || 'Dokumen.pdf');
     const blob = await res.blob();
     openFile(new File([blob], name, { type: 'application/pdf' }));
-  } catch (e) { toast('PDF dari aplikasi lain tidak terbaca. Coba bagikan ulang.'); }
+  } catch (e) { toast('PDF dari aplikasi lain tidak terbaca (' + (e && e.message || e) + '). Coba bagikan ulang.', 7000); }
 }
 
 let deferredPrompt = null;
@@ -833,7 +842,9 @@ $('#installBtn').onclick = async () => {
 
 if ('launchQueue' in window) {
   window.launchQueue.setConsumer(async params => {
-    if (params.files && params.files.length) { try { openFile(await params.files[0].getFile()); } catch (e) {} }
+    if (!params.files || !params.files.length) return;
+    try { openFile(await params.files[0].getFile()); }
+    catch (e) { toast('PDF tidak bisa dibuka (' + (e && e.message || e) + ').', 7000); }
   });
 }
 

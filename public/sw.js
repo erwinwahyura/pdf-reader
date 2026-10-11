@@ -1,5 +1,5 @@
 /* Lembar service worker: offline shell + Web Share Target receiver. */
-const VERSION = 'lembar-v3';
+const VERSION = 'lembar-v4';
 const SHELL = [
   './',
   'manifest.webmanifest',
@@ -71,9 +71,20 @@ async function receiveShare(req) {
   const home = new URL('./', self.registration.scope);
   try {
     const form = await req.formData();
-    const files = form.getAll('pdf').filter(f => f && typeof f === 'object' && f.size > 0);
+    // Accept a file under any field name; Android apps don't always use the declared one.
+    const files = [];
+    const fields = [];
+    for (const [key, value] of form.entries()) {
+      fields.push(key + (value && typeof value === 'object' ? `(file ${value.size}b ${value.type || '?'})` : '(text)'));
+      if (value && typeof value === 'object' && value.size > 0) files.push(value);
+    }
     const file = files.find(f => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name)) || files[0];
-    if (!file) throw new Error('no file');
+    if (!file) {
+      home.searchParams.set('share', 'error');
+      home.searchParams.set('why', 'nofile');
+      home.searchParams.set('detail', fields.join(', ').slice(0, 200) || 'empty form');
+      return Response.redirect(home.href, 303);
+    }
     const name = /\.pdf$/i.test(file.name) ? file.name : (file.name || 'Dokumen') + '.pdf';
     const c = await caches.open(SHARE);
     await c.put('/__shared__', new Response(file, {
@@ -82,6 +93,8 @@ async function receiveShare(req) {
     home.searchParams.set('share', '1');
   } catch (err) {
     home.searchParams.set('share', 'error');
+    home.searchParams.set('why', 'exception');
+    home.searchParams.set('detail', String(err && err.message || err).slice(0, 200));
   }
   return Response.redirect(home.href, 303);
 }

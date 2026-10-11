@@ -9,7 +9,7 @@ export default {
     // If the service worker isn't running yet (first launch after install, cleared data),
     // send the user to the app with an error notice instead of a 405.
     if (request.method === 'POST' && url.pathname === '/share-target') {
-      return Response.redirect(new URL('/?share=error', url).href, 303);
+      return Response.redirect(new URL('/?share=error&why=nosw', url).href, 303);
     }
 
     // Digital Asset Links for the Android app (TWA). Chrome checks this file to trust the APK
