@@ -123,6 +123,14 @@ jobs:
             > build-android/twa-manifest.json
           cd build-android
           bubblewrap update --skipVersionUpgrade > update.log 2>&1 || { report "bubblewrap update failed" update.log; exit 1; }
+          # Custom launcher: copies PDFs opened/shared from other apps into our own FileProvider
+          # before handing them to Chrome (see android/LauncherActivity.java).
+          pkg_dir="app/src/main/java/$(jq -r .packageId twa-manifest.json | tr . /)"
+          test -f "$pkg_dir/LauncherActivity.java" || { echo "generated LauncherActivity not found in $pkg_dir" > patch.log; report "patch failed" patch.log; exit 1; }
+          cp ../android/LauncherActivity.java "$pkg_dir/LauncherActivity.java"
+          paths=app/src/main/res/xml/filepaths.xml
+          grep -q 'shared_pdfs' "$paths" || sed -i 's#</paths>#    <cache-path name="shared_pdfs" path="shared_pdfs/" />\n</paths>#' "$paths"
+          grep -q 'shared_pdfs' "$paths" || { cp "$paths" patch.log; report "filepaths patch failed" patch.log; exit 1; }
 
       - name: Signing key
         id: key
