@@ -153,18 +153,44 @@ public class LauncherActivity
             if (bytes == 0) throw new IllegalStateException("file is empty");
 
             Uri copy = FileProvider.getUriForFile(this, authority(), out);
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setComponent(new ComponentName(this, LauncherActivity.class));
-            send.setType("application/pdf");
-            send.putExtra(Intent.EXTRA_STREAM, copy);
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            send.addFlags(in.getFlags() & (Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
-            Log.i(TAG, "Copied " + bytes + " bytes from " + source.getAuthority() + " to " + copy);
-            return send;
+            grantToBrowsers(copy);
+            Intent next;
+            if (Intent.ACTION_VIEW.equals(action)) {
+                // "Open with": keep it a VIEW of our copy. Chrome hands it to the page's launchQueue
+                // (web manifest file_handlers). Keep the original component (the file-handling alias)
+                // so the helper reads the same metadata as before.
+                next = new Intent(Intent.ACTION_VIEW);
+                next.setDataAndType(copy, "application/pdf");
+                next.setComponent(in.getComponent() != null ? in.getComponent()
+                        : new ComponentName(this, LauncherActivity.class));
+            } else {
+                // "Share": Web Share Target. The subject (file name) also arrives as the "title"
+                // field, so an empty form on the page means Chrome dropped the whole share.
+                next = new Intent(Intent.ACTION_SEND);
+                next.setComponent(new ComponentName(this, LauncherActivity.class));
+                next.setType("application/pdf");
+                next.putExtra(Intent.EXTRA_STREAM, copy);
+                next.putExtra(Intent.EXTRA_SUBJECT, name);
+            }
+            next.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            next.addFlags(in.getFlags() & (Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            Log.i(TAG, "Copied " + bytes + " bytes from " + source.getAuthority() + " to " + copy + " as " + next.getAction());
+            return next;
         } catch (Exception e) {
             Log.e(TAG, "Could not read incoming PDF " + source, e);
             Toast.makeText(this, "Lembar tidak bisa membaca PDF ini: " + e.getMessage(), Toast.LENGTH_LONG).show();
             return null;
+        }
+    }
+
+    /** Belt and braces: let every installed Chrome read the copy, whichever one runs the app. */
+    private void grantToBrowsers(Uri uri) {
+        for (String pkg : CHROME_PACKAGES) {
+            try {
+                grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {
+                // not installed
+            }
         }
     }
 
