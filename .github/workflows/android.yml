@@ -180,6 +180,12 @@ jobs:
           bad=$(grep -o 'android:mimeType(0x[0-9a-f]*)="[^"]*"' manifest.txt | sed 's/.*="//; s/"$//' | grep -v '/' || true)
           if [ -n "$bad" ]; then echo "$bad" > bad.txt; report "Invalid mimeType in APK manifest (needs a '/'): $bad" bad.txt; exit 1; fi
           checks="$checks mimeTypes valid ✓;"
+          # Custom launcher (android/LauncherActivity.java) and its FileProvider path must be in the APK.
+          "$aapt2" dump xmltree --file res/xml/filepaths.xml "$apk" > filepaths.txt 2>&1 || true
+          grep -q 'shared_pdfs' filepaths.txt || { report "APK FileProvider has no shared_pdfs path" filepaths.txt; exit 1; }
+          unzip -p "$apk" 'classes*.dex' | grep -aq 'Lembar tidak bisa membaca PDF ini' \
+            || { echo "custom LauncherActivity not found in dex" > dex.txt; report "custom launcher missing" dex.txt; exit 1; }
+          checks="$checks custom launcher ✓;"
           grep -q 'FILE_HANDLING_ACTION_URL' manifest.txt && checks="$checks file handling metadata ✓;"
           grep -q 'METADATA_SHARE_TARGET' manifest.txt && checks="$checks share target ✓;"
           echo "::notice title=APK check::$(tr '\n' ' ' < badging.txt) |$checks $(cat cert.txt)"
