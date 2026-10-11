@@ -3,6 +3,8 @@ package com.erwarx.lembar;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -13,6 +15,8 @@ import android.util.Log;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+
+import com.google.androidbrowserhelper.trusted.TwaLauncher;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -30,6 +34,11 @@ import java.util.ArrayList;
  * Fix: read the PDF here, copy it into our own cache, and pass Chrome a URI from our own
  * FileProvider through the Web Share Target. The page's service worker receives it at
  * POST /share-target and opens it.
+ *
+ * It also pins Chrome as the browser that runs the app when Chrome is installed. By default the
+ * helper uses the phone's default browser, which on Samsung phones is often Samsung Internet;
+ * that browser doesn't deliver opened files to the page, and its share-target requests arrive
+ * with an unreadable body ("Failed to fetch").
  */
 public class LauncherActivity
         extends com.google.androidbrowserhelper.trusted.LauncherActivity {
@@ -37,6 +46,33 @@ public class LauncherActivity
     private static final String TAG = "Lembar";
     private static final String SHARED_DIR = "shared_pdfs";
     private static final long MAX_AGE_MS = 24L * 60 * 60 * 1000;
+    private static final String[] CHROME_PACKAGES = {
+            "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary"
+    };
+
+    /** Run the app in Chrome when it's installed, instead of the phone's default browser. */
+    @Override
+    protected TwaLauncher createTwaLauncher() {
+        String chrome = installedChrome();
+        if (chrome != null) {
+            Log.i(TAG, "Using " + chrome + " as the TWA provider");
+            return new TwaLauncher(this, chrome);
+        }
+        return super.createTwaLauncher();
+    }
+
+    private String installedChrome() {
+        PackageManager pm = getPackageManager();
+        for (String pkg : CHROME_PACKAGES) {
+            try {
+                PackageInfo info = pm.getPackageInfo(pkg, 0);
+                if (info.applicationInfo != null && info.applicationInfo.enabled) return pkg;
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // not installed
+            }
+        }
+        return null;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

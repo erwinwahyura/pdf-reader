@@ -1,5 +1,5 @@
 /* Lembar service worker: offline shell + Web Share Target receiver. */
-const VERSION = 'lembar-v4';
+const VERSION = 'lembar-v5';
 const SHELL = [
   './',
   'manifest.webmanifest',
