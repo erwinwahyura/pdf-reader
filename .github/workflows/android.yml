@@ -181,8 +181,12 @@ jobs:
           if [ -n "$bad" ]; then echo "$bad" > bad.txt; report "Invalid mimeType in APK manifest (needs a '/'): $bad" bad.txt; exit 1; fi
           checks="$checks mimeTypes valid ✓;"
           # Custom launcher (android/LauncherActivity.java) and its FileProvider path must be in the APK.
-          "$aapt2" dump xmltree --file res/xml/filepaths.xml "$apk" > filepaths.txt 2>&1 || true
-          grep -q 'shared_pdfs' filepaths.txt || { report "APK FileProvider has no shared_pdfs path" filepaths.txt; exit 1; }
+          # Release builds rename resource files, so search every XML resource.
+          found=""
+          for f in $(unzip -Z1 "$apk" 'res/*' | grep '\.xml$'); do
+            if "$aapt2" dump xmltree --file "$f" "$apk" 2>/dev/null | grep -q 'shared_pdfs'; then found="$f"; break; fi
+          done
+          [ -n "$found" ] || { unzip -Z1 "$apk" 'res/*' > filepaths.txt; report "APK FileProvider has no shared_pdfs path" filepaths.txt; exit 1; }
           unzip -p "$apk" 'classes*.dex' | grep -aq 'Lembar tidak bisa membaca PDF ini' \
             || { echo "custom LauncherActivity not found in dex" > dex.txt; report "custom launcher missing" dex.txt; exit 1; }
           checks="$checks custom launcher ✓;"
