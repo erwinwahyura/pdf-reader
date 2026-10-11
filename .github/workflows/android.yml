@@ -168,6 +168,10 @@ jobs:
           checks=""
           grep -q 'android.intent.action.VIEW' manifest.txt && grep -q '"application/pdf"' manifest.txt \
             && checks="$checks Open-with PDF handler ✓;" || { report "APK has no PDF VIEW handler" manifest.txt; exit 1; }
+          # Android rejects the whole APK ("problem parsing the package") if any mimeType lacks a "/".
+          bad=$(grep -o 'android:mimeType(0x[0-9a-f]*)="[^"]*"' manifest.txt | sed 's/.*="//; s/"$//' | grep -v '/' || true)
+          if [ -n "$bad" ]; then echo "$bad" > bad.txt; report "Invalid mimeType in APK manifest (needs a '/'): $bad" bad.txt; exit 1; fi
+          checks="$checks mimeTypes valid ✓;"
           grep -q 'FILE_HANDLING_ACTION_URL' manifest.txt && checks="$checks file handling metadata ✓;"
           grep -q 'METADATA_SHARE_TARGET' manifest.txt && checks="$checks share target ✓;"
           echo "::notice title=APK check::$(tr '\n' ' ' < badging.txt) |$checks $(cat cert.txt)"
