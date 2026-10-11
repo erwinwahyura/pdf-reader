@@ -123,14 +123,8 @@ jobs:
             > build-android/twa-manifest.json
           cd build-android
           bubblewrap update --skipVersionUpgrade > update.log 2>&1 || { report "bubblewrap update failed" update.log; exit 1; }
-          # Custom launcher: copies PDFs opened/shared from other apps into our own FileProvider
-          # before handing them to Chrome (see android/LauncherActivity.java).
-          pkg_dir="app/src/main/java/$(jq -r .packageId twa-manifest.json | tr . /)"
-          test -f "$pkg_dir/LauncherActivity.java" || { echo "generated LauncherActivity not found in $pkg_dir" > patch.log; report "patch failed" patch.log; exit 1; }
-          cp ../android/LauncherActivity.java "$pkg_dir/LauncherActivity.java"
-          paths=app/src/main/res/xml/filepaths.xml
-          grep -q 'shared_pdfs' "$paths" || sed -i 's#</paths>#    <cache-path name="shared_pdfs" path="shared_pdfs/" />\n</paths>#' "$paths"
-          grep -q 'shared_pdfs' "$paths" || { cp "$paths" patch.log; report "filepaths patch failed" patch.log; exit 1; }
+          # Turn the generated TWA into Lembar's WebView shell (see android/patch_project.py).
+          python3 ../android/patch_project.py . .. > patch.log 2>&1 || { report "patch failed" patch.log; exit 1; }
 
       - name: Signing key
         id: key
@@ -180,16 +174,12 @@ jobs:
           bad=$(grep -o 'android:mimeType(0x[0-9a-f]*)="[^"]*"' manifest.txt | sed 's/.*="//; s/"$//' | grep -v '/' || true)
           if [ -n "$bad" ]; then echo "$bad" > bad.txt; report "Invalid mimeType in APK manifest (needs a '/'): $bad" bad.txt; exit 1; fi
           checks="$checks mimeTypes valid ✓;"
-          # Custom launcher (android/LauncherActivity.java) and its FileProvider path must be in the APK.
-          # Release builds rename resource files, so search every XML resource.
-          found=""
-          for f in $(unzip -Z1 "$apk" 'res/*' | grep '\.xml$'); do
-            if "$aapt2" dump xmltree --file "$f" "$apk" 2>/dev/null | grep -q 'shared_pdfs'; then found="$f"; break; fi
-          done
-          [ -n "$found" ] || { unzip -Z1 "$apk" 'res/*' > filepaths.txt; report "APK FileProvider has no shared_pdfs path" filepaths.txt; exit 1; }
-          unzip -p "$apk" 'classes*.dex' | grep -aq 'Lembar tidak bisa membaca PDF ini' \
-            || { echo "custom LauncherActivity not found in dex" > dex.txt; report "custom launcher missing" dex.txt; exit 1; }
-          checks="$checks custom launcher ✓;"
+          # The WebView shell (android/LauncherActivity.java) and its bridge must be in the APK.
+          unzip -p "$apk" 'classes*.dex' > dex.bin
+          grep -aq 'LembarNative' dex.bin && grep -aq 'Lembar tidak bisa membaca PDF ini' dex.bin \
+            || { echo "WebView shell not found in dex" > dex.txt; report "WebView shell missing" dex.txt; exit 1; }
+          grep -q 'launchMode' manifest.txt || { report "LauncherActivity patch missing from manifest" manifest.txt; exit 1; }
+          checks="$checks WebView shell ✓;"
           grep -q 'FILE_HANDLING_ACTION_URL' manifest.txt && checks="$checks file handling metadata ✓;"
           grep -q 'METADATA_SHARE_TARGET' manifest.txt && checks="$checks share target ✓;"
           echo "::notice title=APK check::$(tr '\n' ' ' < badging.txt) |$checks $(cat cert.txt)"

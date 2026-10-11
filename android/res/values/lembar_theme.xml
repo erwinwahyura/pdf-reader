@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Opaque theme for the WebView shell. A light parent makes the page see prefers-color-scheme: light. -->
+    <style name="LembarTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/lembar_background</item>
+    </style>
+    <color name="lembar_background">#EDF0EC</color>
+</resources>
