@@ -839,12 +839,50 @@ async function takeShared() {
 
 let deferredPrompt = null;
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; if (!standalone) $('#installBox').hidden = false; });
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; if (!standalone && !window.LembarNative) $('#installBox').hidden = false; });
 window.addEventListener('appinstalled', () => { $('#installBox').hidden = true; toast('Lembar terpasang. Cari di layar utama.'); });
 $('#installBtn').onclick = async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt(); await deferredPrompt.userChoice.catch(() => {}); deferredPrompt = null; $('#installBox').hidden = true;
 };
+
+/* Android app (WebView shell): PDFs opened or shared from other apps arrive through
+   window.LembarNative, read in base64 chunks. */
+let nativeBusy = false;
+async function takeNative() {
+  const N = window.LembarNative;
+  if (!N || nativeBusy) return;
+  let info = null;
+  try { info = JSON.parse(N.pending() || 'null'); } catch (e) { info = null; }
+  if (!info || !info.size) return;
+  nativeBusy = true;
+  try {
+    if (info.size > 4 * 1024 * 1024) toast('Membuka PDF…', 4000);
+    const CHUNK = 384 * 1024, parts = [];
+    for (let off = 0; off < info.size;) {
+      const b64 = N.read(info.id, off, CHUNK);
+      if (!b64) throw new Error('baca gagal di byte ' + off);
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      parts.push(bytes);
+      off += bytes.length;
+      if (parts.length % 8 === 0) await new Promise(r => setTimeout(r));
+    }
+    N.done(info.id);
+    await openFile(new File(parts, info.name || 'Dokumen.pdf', { type: 'application/pdf' }));
+  } catch (e) {
+    toast('PDF tidak bisa dibuka (' + (e && e.message || e) + ').', 8000);
+  } finally {
+    nativeBusy = false;
+  }
+}
+window.lembarNativeFile = takeNative;
+if (window.LembarNative) {
+  // Inside the Android app: no install prompt, and "Open with" works directly.
+  $('#installBox').hidden = true;
+  const how = document.querySelector('.howto');
+  if (how) how.innerHTML = '<li>Di WhatsApp, <b>ketuk</b> dokumen PDF-nya.</li><li>Pilih <b>Lembar</b> (centang "Selalu" supaya berikutnya langsung terbuka).</li><li>Atau tekan lama → <b>Bagikan</b> → <b>Lembar</b>.</li>';
+}
 
 if ('launchQueue' in window) {
   window.launchQueue.setConsumer(async params => {
@@ -858,6 +896,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catc
 
 renderLibrary();
 takeShared();
+takeNative();
 })();
 </script>
 </body>

@@ -115,24 +115,29 @@ Copy `public/` to the server and use `deploy/Caddyfile`. Caddy handles HTTPS aut
 
 ## Android app ("Open with" from WhatsApp)
 
-A PWA can't appear in Android's "Open with" list, so the repo also builds a small Android app: a [Trusted Web Activity](https://developer.chrome.com/docs/android/trusted-web-activity) made with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap). It runs this same site full-screen in Chrome and registers as a handler for `application/pdf`. When you tap a PDF, Chrome passes the file to the page's `launchQueue`, which `index.html` already reads.
+A PWA can't appear in Android's "Open with" list, so the repo also builds a small Android app. It's a **WebView shell**: a full-screen WebView that loads this same site, with reading history, bookmarks and the offline cache stored inside the app. It registers as a handler for `application/pdf` ("Open with") and as a share target.
+
+The project is generated with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap) (icons, signing, Gradle setup), then `android/patch_project.py` replaces its Trusted Web Activity launcher with `android/LauncherActivity.java`. A TWA was tried first, but Chrome dropped PDFs handed over from WhatsApp on some phones (Galaxy A05s), both through `launchQueue` and the share target.
 
 ```mermaid
 sequenceDiagram
     participant WA as WhatsApp
-    participant APK as Lembar APK
-    participant C as Chrome (TWA)
-    participant App as index.html
-    WA->>APK: ACTION_VIEW content://… (application/pdf)
-    APK->>C: open https://HOST/ with the file
-    C->>C: verify /.well-known/assetlinks.json
-    C->>App: launchQueue → FileSystemFileHandle
-    App->>App: open with pdf.js
+    participant A as LauncherActivity
+    participant W as WebView (index.html)
+    WA->>A: ACTION_VIEW / ACTION_SEND content://… (application/pdf)
+    A->>A: copy to cache/shared_pdfs/
+    A->>W: load https://HOST/ (or evaluateJavascript if already open)
+    W->>A: LembarNative.pending() → {id, name, size}
+    loop chunks of ≤512 KB
+        W->>A: LembarNative.read(id, offset, length) → base64
+    end
+    W->>A: LembarNative.done(id)
+    W->>W: open with pdf.js
 ```
 
 ### One-time setup
 
-The app opens **https://lembar.erwarx.com** (set in the workflow; a `TWA_HOST` repository variable overrides it). `wrangler.toml` already holds the signing certificate's fingerprint, so the Worker serves `/.well-known/assetlinks.json`.
+The app opens **https://lembar.erwarx.com** (set in the workflow; a `TWA_HOST` repository variable overrides it). The WebView shell doesn't need Digital Asset Links; the Worker still serves `/.well-known/assetlinks.json` from `wrangler.toml` in case you go back to a TWA.
 
 The only thing GitHub needs is the signing key, as two repository secrets (*Settings → Secrets and variables → Actions → Secrets*):
 
@@ -159,7 +164,7 @@ Pull requests that touch `android/` build a test APK signed with a throwaway key
 
 ### Requirements on the phone
 
-- Chrome installed and up to date (the TWA runs inside it)
+- Android System WebView up to date (updated through the Play Store)
 - Android 7.0+ (`minSdkVersion` 24, required by androidbrowserhelper)
 
 ## Releasing an update
@@ -168,7 +173,8 @@ Bump `VERSION` in `public/sw.js` (e.g. `lembar-v4`) on every deploy that changes
 
 ## Known limitations
 
-- **"Open with" needs the Android app.** Chrome on Android doesn't support `file_handlers` for installed PWAs, so only the TWA build appears there. The plain PWA gets the share sheet.
+- **"Open with" needs the Android app.** Chrome on Android doesn't support `file_handlers` for installed PWAs, so only the Android app appears there. The plain PWA gets the share sheet.
+- **Separate storage.** The Android app keeps its own history and bookmarks, separate from the PWA in Chrome.
 - **iOS** supports neither "Open with" nor share targets for web apps. Use the in-app **Buka PDF** button.
 - **Scanned PDFs** are images with no text layer, so search finds nothing in them.
 - **Storage is per browser.** History and bookmarks live in that browser's IndexedDB and are lost if site data is cleared.
