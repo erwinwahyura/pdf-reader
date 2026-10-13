@@ -31,6 +31,9 @@ text = text.replace(anchor, anchor + """
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|density"
             android:windowSoftInputMode="adjustResize\"""")
+# The TWA never needed network access (Chrome did the loading); the WebView does.
+if "android.permission.INTERNET" not in text:
+    text = text.replace("<application", '<uses-permission android:name="android.permission.INTERNET" />\n\n    <application', 1)
 manifest.write_text(text)
 
 # Keep the JavaScript bridge methods through R8. The generated release build minifies
